@@ -12,50 +12,34 @@
 package plugins
 
 import (
-	"errors"
 	"fmt"
 	"github.com/mozilla-services/heka/pipeline"
 	"github.com/sfreiberg/gotwilio"
+	"time"
 )
 
 type TwilioOutput struct {
-	client   *gotwilio.TwilioClient
+	client   *gotwilio.Twilio
 	From, To string
+}
+
+type TwilioOutputConfig struct {
+	From  string `toml:"from"`
+	To    string `toml:"to"`
+	Sid   string `toml:"sid"`
+	Token string `toml:"token"`
+}
+
+func (o *TwilioOutput) ConfigStruct() interface{} {
+	return new(TwilioOutputConfig)
 }
 
 // Extract from, to, sid and token value from config and store it on the plugin instance.
 func (o *TwilioOutput) Init(config interface{}) error {
-	var (
-		sid, token string
-		err        error
-	)
-	conf := config.(pipeline.PluginConfig)
-	if sid, err = confGetStr(conf, "sid"); err != nil {
-		return err
-	}
-	if token, err = confGetStr(conf, "token"); err != nil {
-		return err
-	}
-	o.client = gotwilio.NewTwilioClient(sid, token)
-	if o.From, err = confGetStr(conf, "from"); err != nil {
-		return err
-	}
-	if o.To, err = confGetStr(conf, "to"); err != nil {
-		return err
-	}
+	conf := config.(*TwilioOutputConfig)
+	o.From, o.To = conf.From, conf.To
+	o.client = gotwilio.NewTwilioClient(conf.Sid, conf.Token)
 	return nil
-}
-
-func confGetStr(conf pipeline.PluginConfig, key string) (string, err) {
-	intf, ok := conf[key]
-	if !ok {
-		return nil, errors.New("No '" + key + "' setting specified.")
-	}
-	var str string
-	if str, ok = intf.(string); !ok {
-		return nil, errors.New("'" + key + "' setting not a sequence.")
-	}
-	return str, nil
 }
 
 //type Output interface {
@@ -69,13 +53,16 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 	err error) {
 
 	var (
-		hostname string
-		exc      gotwilio.Exception
-		err      error
+		sms string
+		exc *gotwilio.Exception
 	)
 
 	for pack := range runner.InChan() {
-		_, exc, err = o.client.SendSMS(o.From, o.To, pack.Message.GetPayload(), "", "")
+		sms = fmt.Sprintf("%s [%d] %s@%s: %s",
+			time.Unix(pack.Message.GetTimestamp(),0).Format(time.RFC3339),
+			pack.Message.GetSeverity(), pack.Message.GetLogger(),
+			pack.Message.GetHostname(), pack.Message.GetPayload())
+		_, exc, err = o.client.SendSMS(o.From, o.To, sms, "", "")
 		if err == nil && exc != nil {
 			return fmt.Errorf("%s: %d\n%s", exc.Message, exc.Code, exc.MoreInfo)
 		}
