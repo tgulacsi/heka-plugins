@@ -12,6 +12,7 @@ import (
 	"strings"
 )
 
+//  curl -v 'http://localhost:5566/?payload=abbraka&severity=3' -XPOST
 type HttpSimpleInput struct {
 	Address string
 
@@ -88,72 +89,88 @@ func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	msg := new(message.Message)
-
-	msg.Uuid = []byte(q.Get("uuid"))
 	var (
 		i   int64
 		err error
+		s   string
 	)
-	s := q.Get("timestamp")
-	if s != "" {
-		i := strings.Index(s, ".")
-		if i > 0 {
-			s = s[:i]
+
+	for k, vs := range q {
+		k = strings.ToLower(k)
+		switch k {
+		case "uuid":
+			msg.Uuid = []byte(vs[0])
+		case "timestamp":
+			s = vs[0]
+			i := strings.Index(s, ".")
+			if i > 0 {
+				s = s[:i]
+			}
+			ts, e := strconv.ParseInt(s, 10, 64)
+			if e != nil {
+				parsErr(fmt.Errorf("error parsing timestamp %s: %s", s, e))
+				return
+			}
+			msg.Timestamp = &ts
+		case "type":
+			if vs[0] != "" {
+				t := vs[0]
+				msg.Type = &t
+			}
+		case "logger":
+			if vs[0] != "" {
+				t := vs[0]
+				msg.Logger = &t
+			}
+		case "severity":
+			if i, err = strconv.ParseInt(vs[0], 10, 32); err != nil {
+				parsErr(fmt.Errorf("error parsing severity %s: %s", vs[0], err))
+				return
+			}
+			j := int32(i)
+			msg.Severity = &j
+		case "envversion":
+			if vs[0] != "" {
+				t := vs[0]
+				msg.EnvVersion = &t
+
+			}
+		case "hostname":
+			if vs[0] != "" {
+				t := vs[0]
+				msg.Hostname = &t
+			}
+		case "pid":
+			if vs[0] != "" {
+				if i, err = strconv.ParseInt(vs[0], 10, 32); err != nil {
+					parsErr(fmt.Errorf("error parsing pid %s: %s", vs[0], err))
+					return
+				}
+				j := int32(i)
+				msg.Pid = &j
+
+			}
+		case "payload":
+			s = strings.Join(vs, " ")
+			if s != "" {
+				t := s
+				msg.Payload = &t
+			}
+		default:
+			if msg.Fields == nil {
+				msg.Fields = make([]*message.Field, 0, 1)
+			}
+			t := k
+			msg.Fields = append(msg.Fields, &message.Field{Name: &t, ValueString: []string{vs[0]}})
 		}
-		if *msg.Timestamp, err = strconv.ParseInt(s, 10, 64); err != nil {
-			parsErr(fmt.Errorf("error parsing timestamp %s: %s", s, err))
-			return
-		}
 	}
-	s = q.Get("type")
-	if s != "" {
-		t := s
-		msg.Type = &t
-	}
-	s = q.Get("logger")
-	if s != "" {
-		t := s
-		msg.Logger = &t
-	}
-	s = q.Get("severity")
-	if s != "" {
-		if i, err = strconv.ParseInt(s, 10, 32); err != nil {
-			parsErr(fmt.Errorf("error parsing severity %s: %s", s, err))
-			return
-		}
-		j := int32(i)
-		msg.Severity = &j
-	}
-	s = q.Get("envversion")
-	if s != "" {
-		t := s
-		msg.EnvVersion = &t
-	}
-	s = q.Get("hostname")
-	if s != "" {
-		t := s
-		msg.Hostname = &t
-	}
-	s = q.Get("pid")
-	if s != "" {
-		if i, err = strconv.ParseInt(s, 10, 32); err != nil {
-			parsErr(fmt.Errorf("error parsing pid %s: %s", s, err))
-			return
-		}
-		j := int32(i)
-		msg.Pid = &j
-	}
-	s = q.Get("payload")
-	if s != "" {
-		t := s
-		msg.Payload = &t
-	} else {
+	if msg.Payload == nil || *msg.Payload == "" {
 		var buf []byte
 		if buf, err = ioutil.ReadAll(r.Body); err != nil {
 			parsErr(fmt.Errorf("error reading body: %s", err))
 			return
 		}
-        t := string(buf)
+		t := string(buf)
 		msg.Payload = &t
 	}
 	if msg.Uuid == nil || len(msg.Uuid) == 0 {
