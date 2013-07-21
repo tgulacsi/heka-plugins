@@ -19,15 +19,16 @@ import (
 )
 
 type TwilioOutput struct {
-	client   *gotwilio.Twilio
-	From, To string
+	client *gotwilio.Twilio
+	From   string
+	To     []string
 }
 
 type TwilioOutputConfig struct {
-	From  string `toml:"from"`
-	To    string `toml:"to"`
-	Sid   string `toml:"sid"`
-	Token string `toml:"token"`
+	Sid   string   `toml:"sid"`
+	Token string   `toml:"token"`
+	From  string   `toml:"from"`
+	To    []string `toml:"to"`
 }
 
 func (o *TwilioOutput) ConfigStruct() interface{} {
@@ -53,19 +54,20 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 	err error) {
 
 	var (
-		sms string
+		to, sms string
 		exc *gotwilio.Exception
 	)
 
 	for pack := range runner.InChan() {
 		sms = fmt.Sprintf("%s [%d] %s@%s: %s",
-			time.Unix(pack.Message.GetTimestamp(),0).Format(time.RFC3339),
+			time.Unix(pack.Message.GetTimestamp(), 0).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname(), pack.Message.GetPayload())
-		_, exc, err = o.client.SendSMS(o.From, o.To, sms, "", "")
+        for _, to = range o.To {
+		_, exc, err = o.client.SendSMS(o.From, to, sms, "", "")
 		if err == nil && exc != nil {
 			return fmt.Errorf("%s: %d\n%s", exc.Message, exc.Code, exc.MoreInfo)
-		}
+		}}
 
 		pack.Recycle()
 	}
