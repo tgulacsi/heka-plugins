@@ -12,24 +12,27 @@ import (
 	"strings"
 )
 
-//  curl -v 'http://localhost:5566/?payload=abbraka&severity=3' -XPOST
-type HttpSimpleInput struct {
+// HTTPSimpleInput holds the address where we listen to POST/PUT HTTP requests
+//Can be reached with `curl -XPOST 'http://localhost:5566/?payload=abbraka&severity=3'`
+type HTTPSimpleInput struct {
 	Address string
 
 	listener net.Listener
 	packs    chan *pipeline.PipelinePack
 	input    chan *pipeline.PipelinePack
+	ds       pipeline.DecoderSet
 	stop     chan bool
 	errch    chan error
 }
 
-func (hsi *HttpSimpleInput) Stop() {
+// Stop is called when the main hekad wants to stop
+func (hsi *HTTPSimpleInput) Stop() {
 	if hsi.stop != nil {
 		hsi.stop <- true
 	}
 }
 
-func (hsi *HttpSimpleInput) listen() {
+func (hsi *HTTPSimpleInput) listen() {
 	var err error
 	if hsi.listener, err = net.Listen("tcp", hsi.Address); err != nil {
 		hsi.errch <- err
@@ -40,14 +43,18 @@ func (hsi *HttpSimpleInput) listen() {
 	}
 }
 
-func (hsi *HttpSimpleInput) Run(ir pipeline.InputRunner, h pipeline.PluginHelper) (err error) {
+// Run is the main loop which listens for incoming requests and injects the
+// messages read into the heka machinery
+func (hsi *HTTPSimpleInput) Run(ir pipeline.InputRunner, h pipeline.PluginHelper) (err error) {
 	hsi.stop = make(chan bool)
 	hsi.input = make(chan *pipeline.PipelinePack)
 	hsi.errch = make(chan error, 1)
 	hsi.packs = ir.InChan()
+	hsi.ds = h.DecoderSet()
 
 	go hsi.listen()
 	var pack *pipeline.PipelinePack
+INPUT:
 	for {
 		select {
 		case err = <-hsi.errch:
@@ -60,8 +67,8 @@ func (hsi *HttpSimpleInput) Run(ir pipeline.InputRunner, h pipeline.PluginHelper
 			if hsi.listener != nil {
 				hsi.listener.Close()
 				hsi.packs = nil
-				break
 			}
+			break INPUT
 		}
 	}
 	select {
@@ -73,7 +80,7 @@ func (hsi *HttpSimpleInput) Run(ir pipeline.InputRunner, h pipeline.PluginHelper
 	return nil
 }
 
-func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
+func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		defer r.Body.Close()
 	}
@@ -87,19 +94,45 @@ func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 		parsErr(fmt.Errorf("POST needed!"))
 		return
 	}
+	var err error
+	pack := <-hsi.packs
+    defer func() {
+        if err != nil && pack != nil {
+            pack.Recycle()
+        }
+    }()
+
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && (ct == "application/json" || ct == "application/x-protobuf") {
+		k := "JSON"
+		if ct == "application/x-protobuf" {
+			k = "PROTOCOL_BUFFER"
+		}
+		dr, ok := hsi.ds.ByName(k)
+		if !ok {
+			parsErr(fmt.Errorf("cannot get decoder for %s", k))
+			return
+		}
+		if pack.MsgBytes, err = ioutil.ReadAll(r.Body); err != nil {
+			parsErr(fmt.Errorf("error reading request body: %s", err))
+			return
+		}
+		w.WriteHeader(201)
+		dr.InChan() <- pack
+		w.Write([]byte{})
+		return
+	}
 	q := r.URL.Query()
-	msg := new(message.Message)
 	var (
-		i   int64
-		err error
-		s   string
+		i int64
+		s string
 	)
 
 	for k, vs := range q {
 		k = strings.ToLower(k)
 		switch k {
 		case "uuid":
-			msg.Uuid = []byte(vs[0])
+			pack.Message.Uuid = []byte(vs[0])
 		case "timestamp":
 			s = vs[0]
 			i := strings.Index(s, ".")
@@ -111,16 +144,16 @@ func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 				parsErr(fmt.Errorf("error parsing timestamp %s: %s", s, e))
 				return
 			}
-			msg.Timestamp = &ts
+			pack.Message.Timestamp = &ts
 		case "type":
 			if vs[0] != "" {
 				t := vs[0]
-				msg.Type = &t
+				pack.Message.Type = &t
 			}
 		case "logger":
 			if vs[0] != "" {
 				t := vs[0]
-				msg.Logger = &t
+				pack.Message.Logger = &t
 			}
 		case "severity":
 			if i, err = strconv.ParseInt(vs[0], 10, 32); err != nil {
@@ -128,17 +161,17 @@ func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			j := int32(i)
-			msg.Severity = &j
+			pack.Message.Severity = &j
 		case "envversion":
 			if vs[0] != "" {
 				t := vs[0]
-				msg.EnvVersion = &t
+				pack.Message.EnvVersion = &t
 
 			}
 		case "hostname":
 			if vs[0] != "" {
 				t := vs[0]
-				msg.Hostname = &t
+				pack.Message.Hostname = &t
 			}
 		case "pid":
 			if vs[0] != "" {
@@ -147,62 +180,64 @@ func (hsi *HttpSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				j := int32(i)
-				msg.Pid = &j
+				pack.Message.Pid = &j
 
 			}
 		case "payload":
 			s = strings.Join(vs, " ")
 			if s != "" {
 				t := s
-				msg.Payload = &t
+				pack.Message.Payload = &t
 			}
 		default:
-			if msg.Fields == nil {
-				msg.Fields = make([]*message.Field, 0, 1)
+			if pack.Message.Fields == nil {
+				pack.Message.Fields = make([]*message.Field, 0, 1)
 			}
 			t := k
-			msg.Fields = append(msg.Fields, &message.Field{Name: &t, ValueString: []string{vs[0]}})
+			pack.Message.Fields = append(pack.Message.Fields,
+				&message.Field{Name: &t, ValueString: []string{vs[0]}})
 		}
 	}
-	if msg.Payload == nil || *msg.Payload == "" {
+	if pack.Message.Payload == nil || *pack.Message.Payload == "" {
 		var buf []byte
 		if buf, err = ioutil.ReadAll(r.Body); err != nil {
 			parsErr(fmt.Errorf("error reading body: %s", err))
 			return
 		}
 		t := string(buf)
-		msg.Payload = &t
+		pack.Message.Payload = &t
 	}
-	if msg.Uuid == nil || len(msg.Uuid) == 0 {
-		msg.Uuid = []byte(uuid.NewRandom())
+	if pack.Message.Uuid == nil || len(pack.Message.Uuid) == 0 {
+		pack.Message.Uuid = []byte(uuid.NewRandom())
 	}
-
-	pack := <-hsi.packs
 	w.WriteHeader(201)
 
-	pack.Message = msg
 	pack.Decoded = true
 	w.Write([]byte{})
 	hsi.input <- pack
 }
 
-type HttpSimpleInputConfig struct {
+// HTTPSimpleInputConfig holds the user-configurable values:
+//the HTTP address we should listen on
+type HTTPSimpleInputConfig struct {
 	Address string `toml:"address"`
 }
 
-func (hsi *HttpSimpleInput) ConfigStruct() interface{} {
-	return new(HttpSimpleInputConfig)
+// ConfigStruct returns a new config struct to be used to read the config file
+func (hsi *HTTPSimpleInput) ConfigStruct() interface{} {
+	return new(HTTPSimpleInputConfig)
 }
 
-// Extract address value from config and store it on the plugin instance.
-func (hsi *HttpSimpleInput) Init(config interface{}) error {
-	conf := config.(*HttpSimpleInputConfig)
+// Init initializes the Input instance by extracting the address value
+//from the config and store it on the plugin instance.
+func (hsi *HTTPSimpleInput) Init(config interface{}) error {
+	conf := config.(*HTTPSimpleInputConfig)
 	hsi.Address = conf.Address
 	return nil
 }
 
 func init() {
-	pipeline.RegisterPlugin("HttpSimpleInput", func() interface{} {
-		return new(HttpSimpleInput)
+	pipeline.RegisterPlugin("HTTPSimpleInput", func() interface{} {
+		return new(HTTPSimpleInput)
 	})
 }

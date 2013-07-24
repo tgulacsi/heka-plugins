@@ -18,12 +18,14 @@ import (
 	"time"
 )
 
+// TwilioOutput holds the config values for the Twilio Output plugin
 type TwilioOutput struct {
-	client *gotwilio.Twilio
 	From   string
 	To     []string
+	client *gotwilio.Twilio
 }
 
+// TwilioOutputConfig is for reading the configuration file
 type TwilioOutputConfig struct {
 	Sid   string   `toml:"sid"`
 	Token string   `toml:"token"`
@@ -31,11 +33,14 @@ type TwilioOutputConfig struct {
 	To    []string `toml:"to"`
 }
 
+// ConfigStruct returns the struct for reading the configuration file
 func (o *TwilioOutput) ConfigStruct() interface{} {
 	return new(TwilioOutputConfig)
 }
 
-// Extract from, to, sid and token value from config and store it on the plugin instance.
+// Init initializes the givegn TwilioOutput instance by
+//extracting from, to, sid and token value from config
+//and store it on the plugin instance.
 func (o *TwilioOutput) Init(config interface{}) error {
 	conf := config.(*TwilioOutputConfig)
 	o.From, o.To = conf.From, conf.To
@@ -48,14 +53,15 @@ func (o *TwilioOutput) Init(config interface{}) error {
 //    }
 //
 
-// Fetch correct output and iterate over received messages, checking against
-// message hostname and delivering to the output if hostname is in our config.
+// Run is the plugin's main loop
+//iterates over received messages, checking against
+//message hostname and delivering to the output if hostname is in our config.
 func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHelper) (
 	err error) {
 
 	var (
 		to, sms string
-		exc *gotwilio.Exception
+		exc     *gotwilio.Exception
 	)
 
 	for pack := range runner.InChan() {
@@ -63,11 +69,12 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 			time.Unix(pack.Message.GetTimestamp(), 0).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname(), pack.Message.GetPayload())
-        for _, to = range o.To {
-		_, exc, err = o.client.SendSMS(o.From, to, sms, "", "")
-		if err == nil && exc != nil {
-			return fmt.Errorf("%s: %d\n%s", exc.Message, exc.Code, exc.MoreInfo)
-		}}
+		for _, to = range o.To {
+			_, exc, err = o.client.SendSMS(o.From, to, sms, "", "")
+			if err == nil && exc != nil {
+				return fmt.Errorf("%s: %d\n%s", exc.Message, exc.Code, exc.MoreInfo)
+			}
+		}
 
 		pack.Recycle()
 	}
