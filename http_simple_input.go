@@ -2,14 +2,16 @@ package plugins
 
 import (
 	"code.google.com/p/go-uuid/uuid"
-	"fmt"
 	"github.com/mozilla-services/heka/message"
 	"github.com/mozilla-services/heka/pipeline"
+
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // HTTPSimpleInput holds the address where we listen to POST/PUT HTTP requests
@@ -36,10 +38,14 @@ func (hsi *HTTPSimpleInput) listen() {
 	var err error
 	if hsi.listener, err = net.Listen("tcp", hsi.Address); err != nil {
 		hsi.errch <- err
+		return
 	}
 	s := &http.Server{Addr: hsi.Address, Handler: http.HandlerFunc(hsi.handler)}
-	if err = s.Serve(hsi.listener); err != nil {
+	if err = s.Serve(hsi.listener); err != nil && hsi != nil && hsi.errch != nil {
 		hsi.errch <- err
+	}
+	if hsi.errch != nil {
+		close(hsi.errch)
 	}
 }
 
@@ -76,6 +82,7 @@ INPUT:
 		return
 	default:
 		close(hsi.errch)
+		hsi.errch = nil
 	}
 	return nil
 }
@@ -96,14 +103,15 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	var err error
 	pack := <-hsi.packs
-    defer func() {
-        if err != nil && pack != nil {
-            pack.Recycle()
-        }
-    }()
+	defer func() {
+		if err != nil && pack != nil {
+			pack.Recycle()
+		}
+	}()
 
 	ct := r.Header.Get("Content-Type")
-	if ct != "" && (ct == "application/json" || ct == "application/x-protobuf") {
+	if ct != "" && strings.HasPrefix(ct, "application/") &&
+		(ct == "application/json" || ct == "application/x-protobuf") {
 		k := "JSON"
 		if ct == "application/x-protobuf" {
 			k = "PROTOCOL_BUFFER"
@@ -127,6 +135,7 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 		i int64
 		s string
 	)
+	start := time.Now().UnixNano() - 1000000
 
 	for k, vs := range q {
 		k = strings.ToLower(k)
@@ -207,8 +216,18 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 		t := string(buf)
 		pack.Message.Payload = &t
 	}
+	if pack.Message.Hostname == nil {
+		pack.Message.SetHostname(r.Host)
+	}
 	if pack.Message.Uuid == nil || len(pack.Message.Uuid) == 0 {
 		pack.Message.Uuid = []byte(uuid.NewRandom())
+	}
+	if pack.Message.Type == nil {
+		pack.Message.SetType("heka.httpdata-simple")
+	}
+	if pack.Message.Timestamp == nil || *pack.Message.Timestamp < start {
+		//fmt.Printf("setting timestamp to %s", time.Now().UnixNano())
+		pack.Message.SetTimestamp(time.Now().UnixNano())
 	}
 	w.WriteHeader(201)
 
@@ -237,7 +256,9 @@ func (hsi *HTTPSimpleInput) Init(config interface{}) error {
 }
 
 func init() {
-	pipeline.RegisterPlugin("HTTPSimpleInput", func() interface{} {
+	i := func() interface{} {
 		return new(HTTPSimpleInput)
-	})
+	}
+	pipeline.RegisterPlugin("HttpSimpleInput", i)
+	pipeline.RegisterPlugin("HTTPSimpleInput", i)
 }

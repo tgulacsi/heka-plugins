@@ -10,6 +10,7 @@ if which golint 2>/dev/null; then
     golint *.go
 fi
 echo build
-go build -tags nolua
+go build
+#-tags nolua
 echo test
 go test -tags nolua "$@"
