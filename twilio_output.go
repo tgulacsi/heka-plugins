@@ -69,6 +69,7 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 			time.Unix(pack.Message.GetTimestamp(), 0).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname(), pack.Message.GetPayload())
+		pack.Recycle()
 		for _, to = range o.To {
 			_, exc, err = o.client.SendSMS(o.From, to, sms, "", "")
 			if err == nil && exc != nil {
@@ -76,7 +77,6 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 			}
 		}
 
-		pack.Recycle()
 	}
 	return
 }
