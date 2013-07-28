@@ -96,25 +96,25 @@ func (o *EmailOutput) Prepare() error {
 			mxAddrsLock.Unlock()
 			ok = false
 			for _, mx := range mxs {
-				log.Printf("sending with %s to %s", mx.Host, tos)
+				log.Printf("test sending with %s to %s", mx.Host, tos)
 				err = testMail(mx.Host+":25", nil, o.From, tos, 10*time.Second)
-				log.Printf("send with %s to %s result: %s", mx.Host, tos, err)
+				log.Printf("test send with %s to %s result: %s", mx.Host, tos, err)
 				if err == nil {
 					ok = true
 					break
 				}
 			}
 			if !ok {
-				return fmt.Errorf("error sending mail from %s to %s with %s: %s",
+				return fmt.Errorf("error test sending mail from %s to %s with %s: %s",
 					o.From, tos, mxs, err)
 			}
 		}
 		return nil
 	}
 	o.byHost = make(map[string][]string, 1)
-	log.Printf("sending with %s to %s", o.hostport, o.To)
+	log.Printf("test sending with %s to %s", o.hostport, o.To)
 	err := testMail(o.hostport, o.auth, o.From, o.To, 10*time.Second)
-	log.Printf("send with %s to %s result: %s", o.hostport, o.To, err)
+	log.Printf("test send with %s to %s result: %s", o.hostport, o.To, err)
 	if err == nil {
 		o.byHost[""] = o.To
 	}
@@ -132,7 +132,10 @@ func (o *EmailOutput) Prepare() error {
 func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHelper) (
 	err error) {
 
-	var payload string
+	var (
+		ts      int64
+		payload string
+	)
 	body := bytes.NewBuffer(nil)
 
 	for pack := range runner.InChan() {
@@ -140,8 +143,9 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 		if len(payload) > 100 {
 			payload = payload[:100]
 		}
+		ts = pack.Message.GetTimestamp()
 		body.WriteString(fmt.Sprintf("Subject: %s [%d] %s@%s: ",
-			time.Unix(pack.Message.GetTimestamp(), 0).Format(time.RFC3339),
+			time.Unix(ts/int64(time.Second), ts%int64(time.Second)).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname()))
 		body.WriteString(payload)
