@@ -16,8 +16,11 @@ import (
 
 	"bytes"
 	"fmt"
+	"log"
+	"net"
 	"net/smtp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +30,7 @@ type EmailOutput struct {
 	To       []string
 	hostport string
 	auth     smtp.Auth
+	byHost   map[string][]string
 }
 
 // EmailOutputConfig is for reading the configuration file
@@ -49,17 +53,72 @@ func (o *EmailOutput) ConfigStruct() interface{} {
 func (o *EmailOutput) Init(config interface{}) error {
 	conf := config.(*EmailOutputConfig)
 	o.hostport = conf.Address
-	host := o.hostport
-	if i := strings.Index(host, ":"); i >= 0 {
-		host = host[:i]
-	} else {
-		o.hostport = host + ":25"
-	}
-	if conf.Username != "" {
-		o.auth = smtp.PlainAuth("", conf.Username, conf.Password, host)
+	if o.hostport != "" {
+		host := o.hostport
+		if i := strings.Index(host, ":"); i >= 0 {
+			host = host[:i]
+		} else {
+			o.hostport = host + ":25"
+		}
+		if conf.Username != "" {
+			o.auth = smtp.PlainAuth("", conf.Username, conf.Password, host)
+		}
 	}
 	o.From, o.To = conf.From, conf.To
-	return nil
+	return o.Prepare()
+}
+
+//Prepare prepares the sending (gets MX records if no hostport is given)
+func (o *EmailOutput) Prepare() error {
+	if o.hostport == "" {
+		var (
+			i    int
+			ok   bool
+			host string
+			err  error
+			tos  []string
+			mxs  []*net.MX
+		)
+		o.byHost = make(map[string][]string, len(o.To))
+		for _, tos := range o.To {
+			i = strings.Index(tos, "@")
+			host = tos[i+1:]
+			o.byHost[host] = append(o.byHost[host], tos)
+		}
+		for host, tos = range o.byHost {
+			mxAddrsLock.Lock()
+			if mxs, ok = mxAddrs[host]; !ok {
+				if mxs, err = net.LookupMX(host); err != nil {
+					return fmt.Errorf("error looking up MX record for %s: %s", host, err)
+				}
+				mxAddrs[host] = mxs
+			}
+			mxAddrsLock.Unlock()
+			ok = false
+			for _, mx := range mxs {
+				log.Printf("sending with %s to %s", mx.Host, tos)
+				err = testMail(mx.Host+":25", nil, o.From, tos, 10*time.Second)
+				log.Printf("send with %s to %s result: %s", mx.Host, tos, err)
+				if err == nil {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return fmt.Errorf("error sending mail from %s to %s with %s: %s",
+					o.From, tos, mxs, err)
+			}
+		}
+		return nil
+	}
+	o.byHost = make(map[string][]string, 1)
+	log.Printf("sending with %s to %s", o.hostport, o.To)
+	err := testMail(o.hostport, o.auth, o.From, o.To, 10*time.Second)
+	log.Printf("send with %s to %s result: %s", o.hostport, o.To, err)
+	if err == nil {
+		o.byHost[""] = o.To
+	}
+	return err
 }
 
 //type Output interface {
@@ -89,7 +148,7 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 		body.WriteString("\r\n\r\n")
 		body.WriteString(pack.Message.GetPayload())
 		pack.Recycle()
-		err = smtp.SendMail(o.hostport, o.auth, o.From, o.To, body.Bytes())
+		err = o.sendMail(body.Bytes())
 		body.Reset()
 		if err != nil {
 			return fmt.Errorf("error sending email: %s", err)
@@ -97,6 +156,101 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 
 	}
 	return
+}
+
+var mxAddrs = make(map[string][]*net.MX, 16)
+var mxAddrsLock = sync.Mutex{}
+
+// sendMail sends mail using smtp.SendMail but looks up MX records if no hostport is provided
+func (o EmailOutput) sendMail(body []byte) error {
+	if o.hostport == "" {
+		var (
+			host string
+			err  error
+			tos  []string
+			mxs  []*net.MX
+		)
+		for host, tos = range o.byHost {
+			mxAddrsLock.Lock()
+			mxs = mxAddrs[host]
+			mxAddrsLock.Unlock()
+			err = nil
+			for _, mx := range mxs {
+				log.Printf("sending with %s to %s", mx.Host, tos)
+				err = smtp.SendMail(mx.Host+":25", nil, o.From, tos, body)
+				log.Printf("send with %s to %s result: %s", mx.Host, tos, err)
+				if err == nil {
+					break
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("error sending mail from %s to %s with %s: %s",
+					o.From, tos, mxs, err)
+			}
+		}
+		return nil
+	}
+	log.Printf("sending with %s to %s", o.hostport, o.To)
+	err := smtp.SendMail(o.hostport, o.auth, o.From, o.To, body)
+	log.Printf("send with %s to %s result: %s", o.hostport, o.To, err)
+	return err
+}
+
+// testMail connects to the server at addr, switches to TLS if possible,
+// authenticates with mechanism a if possible, and then tests sending an email from
+// address from, to addresses to
+func testMail(addr string, a smtp.Auth, from string, to []string, timeout time.Duration) error {
+	//c, err := Dial(addr)
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return err
+	}
+	host, _, _ := net.SplitHostPort(addr)
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+
+	// cmd is a convenience function that sends a command and returns the response
+	cmd := func(expectCode int, format string, args ...interface{}) (int, string, error) {
+		id, err := c.Text.Cmd(format, args...)
+		if err != nil {
+			return 0, "", err
+		}
+		c.Text.StartResponse(id)
+		defer c.Text.EndResponse(id)
+		code, msg, err := c.Text.ReadResponse(expectCode)
+		return code, msg, err
+	}
+	_ = cmd
+
+	if err := c.Hello("localhost"); err != nil {
+		return err
+	}
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err = c.StartTLS(nil); err != nil {
+			return err
+		}
+	}
+	if a != nil { //&& c.ext != nil {
+		//if _, ok := c.ext["AUTH"]; ok {
+		if err = c.Auth(a); err != nil {
+			return err
+		}
+		//}
+	}
+	if err = c.Mail(from); err != nil {
+		return err
+	}
+	for _, addr := range to {
+		if err = c.Rcpt(addr); err != nil {
+			return err
+		}
+	}
+	c.Reset()
+	c.Close()
+	c.Quit()
+	return nil
 }
 
 func init() {
