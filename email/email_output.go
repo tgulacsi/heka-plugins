@@ -9,7 +9,7 @@
 #
 # ***** END LICENSE BLOCK *****/
 
-package plugins
+package email
 
 import (
 	"github.com/mozilla-services/heka/pipeline"

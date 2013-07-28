@@ -9,7 +9,7 @@
 #
 # ***** END LICENSE BLOCK *****/
 
-package plugins
+package twilio
 
 import (
 	"fmt"

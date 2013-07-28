@@ -3,7 +3,15 @@ See http://hekad.readthedocs.org/en/latest/developing/plugin.html#plugins
 for compiling in plugins.
 
 Basically, you'll need to edit the etc/plugin_packages.json file
-and heka will recognize your plugins.
+and heka will recognize your plugins. Such as
+
+    {"plugin_packages": ["github.com/mozilla-services/heka-mozsvc-plugins",
+        "github.com/tgulacsi/heka-plugins/email",
+        "github.com/tgulacsi/heka-plugins/http",
+        "github.com/tgulacsi/heka-plugins/twilio",
+        "github.com/tgulacsi/heka-plugins/mantis"
+        ]}
+
 
 ## TwilioOutput
 Give Twilio's sid and token, a from and some to, and don't forget to set the
@@ -43,3 +51,15 @@ Watch out: mail sending usually SLOW, thus send mail rarely or use a very fast m
     password = "passw"
     from = "hekad"
     to = ["test+heka@example.eu"]
+
+## MantisOutput
+Adds a new issue to the configured MantisBT instance.
+
+    [MantisOutput]
+    message_matcher = "Severity < 3"
+    url = "https://www.example.com/mantis/xmlrpc.php"
+    project = "Something"
+    method = "new_issue"
+    username = "user"
+    password = "pwd"
+

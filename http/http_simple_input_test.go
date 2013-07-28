@@ -12,7 +12,7 @@
 #
 # ***** END LICENSE BLOCK *****/
 
-package plugins
+package http
 
 import (
 	"code.google.com/p/gomock/gomock"
