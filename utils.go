@@ -13,6 +13,7 @@ package plugins
 
 import "time"
 
+// TsTime converts a Message.Timestamp (UnixNano) to time.Time
 func TsTime(ts int64) time.Time {
-			return time.Unix(ts/int64(time.Second), ts%int64(time.Second))
-        }
+	return time.Unix(ts/int64(time.Second), ts%int64(time.Second))
+}

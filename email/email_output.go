@@ -13,6 +13,7 @@ package email
 
 import (
 	"github.com/mozilla-services/heka/pipeline"
+	plugins "github.com/tgulacsi/heka-plugins"
 
 	"bytes"
 	"fmt"
@@ -133,7 +134,6 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 	err error) {
 
 	var (
-		ts      int64
 		payload string
 	)
 	body := bytes.NewBuffer(nil)
@@ -143,9 +143,8 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 		if len(payload) > 100 {
 			payload = payload[:100]
 		}
-		ts = pack.Message.GetTimestamp()
 		body.WriteString(fmt.Sprintf("Subject: %s [%d] %s@%s: ",
-			time.Unix(ts/int64(time.Second), ts%int64(time.Second)).Format(time.RFC3339),
+			plugins.TsTime(pack.Message.GetTimestamp()).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname()))
 		body.WriteString(payload)
