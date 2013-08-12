@@ -11,9 +11,9 @@
 
 package plugins
 
-import "time"
-
-// TsTime converts a Message.Timestamp (UnixNano) to time.Time
-func TsTime(ts int64) time.Time {
-	return time.Unix(ts/int64(time.Second), ts%int64(time.Second))
-}
+import (
+	_ "github.com/tgulacsi/heka-plugins/email"
+	_ "github.com/tgulacsi/heka-plugins/http"
+	_ "github.com/tgulacsi/heka-plugins/mantis"
+	_ "github.com/tgulacsi/heka-plugins/twilio"
+)

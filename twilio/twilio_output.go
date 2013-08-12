@@ -14,7 +14,7 @@ package twilio
 import (
 	"github.com/mozilla-services/heka/pipeline"
 	"github.com/sfreiberg/gotwilio"
-	plugins "github.com/tgulacsi/heka-plugins"
+	"github.com/tgulacsi/heka-plugins/utils"
 
 	"fmt"
 	"time"
@@ -68,7 +68,7 @@ func (o *TwilioOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 
 	for pack := range runner.InChan() {
 		sms = fmt.Sprintf("%s [%d] %s@%s: %s",
-			plugins.TsTime(pack.Message.GetTimestamp()).Format(time.RFC3339),
+			utils.TsTime(pack.Message.GetTimestamp()).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname(), pack.Message.GetPayload())
 		pack.Recycle()

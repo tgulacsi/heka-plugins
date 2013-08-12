@@ -13,7 +13,7 @@ package mantis
 
 import (
 	"github.com/mozilla-services/heka/pipeline"
-	plugins "github.com/tgulacsi/heka-plugins"
+	"github.com/tgulacsi/heka-plugins/utils"
 
 	"bytes"
 	"fmt"
@@ -50,7 +50,7 @@ func (o *MantisOutput) ConfigStruct() interface{} {
 func (o *MantisOutput) Init(config interface{}) error {
 	conf := config.(*MantisOutputConfig)
 	o.sender = NewMantisSender(conf.URL, conf.Project, conf.Category, conf.Method,
-    conf.Username, conf.Password)
+		conf.Username, conf.Password)
 	return nil
 }
 
@@ -73,7 +73,7 @@ func (o *MantisOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginH
 	for pack := range runner.InChan() {
 		long = pack.Message.GetPayload()
 		short = fmt.Sprintf("%s [%d] %s@%s: %s",
-			plugins.TsTime(pack.Message.GetTimestamp()).Format(time.RFC3339),
+			utils.TsTime(pack.Message.GetTimestamp()).Format(time.RFC3339),
 			pack.Message.GetSeverity(), pack.Message.GetLogger(),
 			pack.Message.GetHostname(), long)
 		pack.Recycle()
