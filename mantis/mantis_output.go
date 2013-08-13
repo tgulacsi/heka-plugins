@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+    "crypto/tls"
 )
 
 // MantisOutput holds the config values for the Mantis Output plugin
@@ -37,6 +38,7 @@ type MantisOutputConfig struct {
 	Method   string `toml:"method"`
 	Username string `toml:"username"`
 	Password string `toml:"password"`
+    NoCertCheck boolean `toml:"no_cert_check"`
 }
 
 // ConfigStruct returns the struct for reading the configuration file
@@ -50,7 +52,7 @@ func (o *MantisOutput) ConfigStruct() interface{} {
 func (o *MantisOutput) Init(config interface{}) error {
 	conf := config.(*MantisOutputConfig)
 	o.sender = NewMantisSender(conf.URL, conf.Project, conf.Category, conf.Method,
-		conf.Username, conf.Password)
+		conf.Username, conf.Password, conf.NoCertCheck)
 	return nil
 }
 
@@ -90,10 +92,11 @@ type callFunc func(subject, body string) (int, error)
 type mantisSender struct {
 	URL, project, category, username, password, method string
 	callers                                            map[string]callFunc
+    client *http.Client
 }
 
 // NewMantisSender returns a new Mantis sender
-func NewMantisSender(url, project, category, method, username, password string) *mantisSender {
+func NewMantisSender(url, project, category, method, username, password string, noCertCheck boolean) *mantisSender {
 	ms := &mantisSender{callers: make(map[string]callFunc, 4)}
 	if method == "" {
 		method = "new_issue"
@@ -103,6 +106,16 @@ func NewMantisSender(url, project, category, method, username, password string) 
 	if ms.method == "" {
 		ms.method = "new_issue"
 	}
+    ms.noCertCheck = noCertCheck
+	tr := &http.Transport{
+        DisableKeepAlives: false,
+		DisableCompression: false,
+        ResponseHeaderTimeout: 30,
+	}
+    if noCertCheck {
+        tr.TLSClientConfig = &tls.Config{InsecureSkipVerify:true}
+    }
+	ms.client = &http.Client{Transport: tr}
 	return ms
 }
 
@@ -119,7 +132,7 @@ func (ms *mantisSender) Send(subject, body string) (int, error) {
 				"description": body,
 				"category":    ms.category}
 			log.Printf("calling %s new_issue(%v)", ms.URL, args)
-			resp, fault, err := Call(ms.URL, ms.username, ms.password, ms.method, args)
+			resp, fault, err := Call(ms.client, ms.URL, ms.username, ms.password, ms.method, args)
 			log.Printf("got %v, %v, %s", resp, fault, err)
 			if err == nil {
 				log.Printf("response: %v", resp)
@@ -132,7 +145,7 @@ func (ms *mantisSender) Send(subject, body string) (int, error) {
 }
 
 // Call is an xmlrpc.Call, but without gzip and Basic Auth and strips non-xml
-func Call(uri, username, password, name string, args ...interface{}) (
+func Call(client *http.Client,uri, username, password, name string, args ...interface{}) (
 	interface{}, *xmlrpc.Fault, error) {
 
 	buf := bytes.NewBuffer(nil)
@@ -140,11 +153,6 @@ func Call(uri, username, password, name string, args ...interface{}) (
 	if e != nil {
 		return nil, nil, e
 	}
-	tr := &http.Transport{
-		//ClientConfig:    &tls.Config{RootCAs: pool},
-		DisableCompression: true,
-	}
-	client := &http.Client{Transport: tr}
 	req, e := http.NewRequest("POST", uri, buf)
 	if e != nil {
 		return nil, nil, e

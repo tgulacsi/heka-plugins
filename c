@@ -10,7 +10,10 @@ if which golint 2>/dev/null; then
     golint *.go
 fi
 echo build
-go build
+find . -maxdepth 1 -type d -name '[a-z]*' | while read dn; do
+    echo go build $dn
+    go build $dn
+done
 #-tags nolua
 echo test
 go test -tags nolua "$@"

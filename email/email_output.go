@@ -16,6 +16,7 @@ import (
 	"github.com/tgulacsi/heka-plugins/utils"
 
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -25,22 +26,27 @@ import (
 	"time"
 )
 
+// DefaultTimeout is the default timeout
+var DefaultTimeout = 30 * time.Second
+
 // EmailOutput holds the config values for the Email Output plugin
 type EmailOutput struct {
-	From     string
-	To       []string
-	hostport string
-	auth     smtp.Auth
-	byHost   map[string][]string
+	From      string
+	To        []string
+	hostport  string
+	auth      smtp.Auth
+	byHost    map[string][]string
+	tlsConfig *tls.Config
 }
 
 // EmailOutputConfig is for reading the configuration file
 type EmailOutputConfig struct {
-	Address  string   `toml:"address"`
-	Username string   `toml:"username"`
-	Password string   `toml:"password"`
-	From     string   `toml:"from"`
-	To       []string `toml:"to"`
+	Address     string   `toml:"address"`
+	Username    string   `toml:"username"`
+	Password    string   `toml:"password"`
+	From        string   `toml:"from"`
+	To          []string `toml:"to"`
+	NoCertCheck boolean  `toml:"no_cert_check"`
 }
 
 // ConfigStruct returns the struct for reading the configuration file
@@ -66,6 +72,9 @@ func (o *EmailOutput) Init(config interface{}) error {
 		}
 	}
 	o.From, o.To = conf.From, conf.To
+	if conf.NoCertCheck {
+		o.tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	return o.Prepare()
 }
 
@@ -98,7 +107,8 @@ func (o *EmailOutput) Prepare() error {
 			ok = false
 			for _, mx := range mxs {
 				log.Printf("test sending with %s to %s", mx.Host, tos)
-				err = testMail(mx.Host+":25", nil, o.From, tos, 10*time.Second)
+				err = testMail(mx.Host+":25", nil, o.From, tos, 10*time.Second,
+					o.tlsConfig)
 				log.Printf("test send with %s to %s result: %s", mx.Host, tos, err)
 				if err == nil {
 					ok = true
@@ -114,7 +124,7 @@ func (o *EmailOutput) Prepare() error {
 	}
 	o.byHost = make(map[string][]string, 1)
 	log.Printf("test sending with %s to %s", o.hostport, o.To)
-	err := testMail(o.hostport, o.auth, o.From, o.To, 10*time.Second)
+	err := testMail(o.hostport, o.auth, o.From, o.To, 10*time.Second, o.tlsConfig)
 	log.Printf("test send with %s to %s result: %s", o.hostport, o.To, err)
 	if err == nil {
 		o.byHost[""] = o.To
@@ -151,7 +161,7 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 		body.WriteString("\r\n\r\n")
 		body.WriteString(pack.Message.GetPayload())
 		pack.Recycle()
-		err = o.sendMail(body.Bytes())
+		err = o.sendMail(body.Bytes(), o.tlsConfig)
 		body.Reset()
 		if err != nil {
 			return fmt.Errorf("error sending email: %s", err)
@@ -180,7 +190,8 @@ func (o EmailOutput) sendMail(body []byte) error {
 			err = nil
 			for _, mx := range mxs {
 				log.Printf("sending with %s to %s", mx.Host, tos)
-				err = smtp.SendMail(mx.Host+":25", nil, o.From, tos, body)
+				err = sendMail(mx.Host+":25", nil, o.From, tos, body,
+					30, o.tlsConfig)
 				log.Printf("send with %s to %s result: %s", mx.Host, tos, err)
 				if err == nil {
 					break
@@ -194,7 +205,8 @@ func (o EmailOutput) sendMail(body []byte) error {
 		return nil
 	}
 	log.Printf("sending with %s to %s", o.hostport, o.To)
-	err := smtp.SendMail(o.hostport, o.auth, o.From, o.To, body)
+	err := sendMail(o.hostport, o.auth, o.From, o.To, body,
+    DefaultTimeout, o.tlsConfig)
 	log.Printf("send with %s to %s result: %s", o.hostport, o.To, err)
 	return err
 }
@@ -202,7 +214,16 @@ func (o EmailOutput) sendMail(body []byte) error {
 // testMail connects to the server at addr, switches to TLS if possible,
 // authenticates with mechanism a if possible, and then tests sending an email from
 // address from, to addresses to
-func testMail(addr string, a smtp.Auth, from string, to []string, timeout time.Duration) error {
+func testMail(addr string, a smtp.Auth, from string, to []string, timeout time.Duration, tlsConfig *tls.Config) error {
+	return sendMail(addr, a, from, to, nil, timeout, tlsConfig)
+}
+
+// sendMail connects to the server at addr, switches to TLS if possible (using the given config),
+// authenticates with mechanism a if possible, and then sends an email from
+// address from, to addresses to, with message msg.
+//
+// If msg is nil, then quits, this testing the recipients and the server
+func sendMail(addr string, a smtp.Auth, from string, to []string, msg []byte, timeout time.Duration, tlsConfig *tls.Config) error {
 	//c, err := Dial(addr)
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
@@ -213,34 +234,23 @@ func testMail(addr string, a smtp.Auth, from string, to []string, timeout time.D
 	if err != nil {
 		return err
 	}
-
-	// cmd is a convenience function that sends a command and returns the response
-	cmd := func(expectCode int, format string, args ...interface{}) (int, string, error) {
-		id, err := c.Text.Cmd(format, args...)
-		if err != nil {
-			return 0, "", err
-		}
-		c.Text.StartResponse(id)
-		defer c.Text.EndResponse(id)
-		code, msg, err := c.Text.ReadResponse(expectCode)
-		return code, msg, err
-	}
-	_ = cmd
-
+	//if err := c.hello(); err != nil {
+	//    return err
+	//}
 	if err := c.Hello("localhost"); err != nil {
 		return err
 	}
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err = c.StartTLS(nil); err != nil {
+		if err = c.StartTLS(tlsConfig); err != nil {
 			return err
 		}
 	}
-	if a != nil { //&& c.ext != nil {
-		//if _, ok := c.ext["AUTH"]; ok {
-		if err = c.Auth(a); err != nil {
-			return err
+	if a != nil {
+		if ok, _ = c.Extension("AUTH"); ok {
+			if err = c.Auth(a); err != nil {
+				return err
+			}
 		}
-		//}
 	}
 	if err = c.Mail(from); err != nil {
 		return err
@@ -250,10 +260,21 @@ func testMail(addr string, a smtp.Auth, from string, to []string, timeout time.D
 			return err
 		}
 	}
-	c.Reset()
-	c.Close()
-	c.Quit()
-	return nil
+	if msg != nil {
+		w, err := c.Data()
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(msg)
+		if err != nil {
+			return err
+		}
+		err = w.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return c.Quit()
 }
 
 func init() {
