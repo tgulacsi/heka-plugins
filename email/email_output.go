@@ -161,7 +161,7 @@ func (o *EmailOutput) Run(runner pipeline.OutputRunner, helper pipeline.PluginHe
 		body.WriteString("\r\n\r\n")
 		body.WriteString(pack.Message.GetPayload())
 		pack.Recycle()
-		err = o.sendMail(body.Byte())
+		err = o.sendMail(body.Bytes())
 		body.Reset()
 		if err != nil {
 			return fmt.Errorf("error sending email: %s", err)
@@ -246,7 +246,7 @@ func sendMail(addr string, a smtp.Auth, from string, to []string, msg []byte, ti
 		}
 	}
 	if a != nil {
-        if ok, _ := c.Extension("AUTH"); ok {
+		if ok, _ := c.Extension("AUTH"); ok {
 			if err = c.Auth(a); err != nil {
 				return err
 			}
