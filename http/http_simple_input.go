@@ -214,7 +214,9 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
             if f, err = message.NewField(k, vs[0], vs[0]); err != nil {
                 parsErr(fmt.Errorf("cannot create field for %q=%q: %s", k, vs[0], err))
             }
-            pack.Message.AddField(f)
+            if f != nil && f.ValueType != nil {
+                pack.Message.AddField(f)
+            }
 		}
 	}
 	if pack.Message.Payload == nil || *pack.Message.Payload == "" {
