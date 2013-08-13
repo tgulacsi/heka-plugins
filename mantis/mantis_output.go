@@ -16,13 +16,13 @@ import (
 	"github.com/tgulacsi/heka-plugins/utils"
 
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"github.com/tgulacsi/go-xmlrpc"
 	"io"
 	"log"
 	"net/http"
 	"time"
-    "crypto/tls"
 )
 
 // MantisOutput holds the config values for the Mantis Output plugin
@@ -32,13 +32,13 @@ type MantisOutput struct {
 
 // MantisOutputConfig is for reading the configuration file
 type MantisOutputConfig struct {
-	URL      string `toml:"url"` //URL of the xmlrpc.php
-	Project  string `toml:"project"`
-	Category string `toml:"category"`
-	Method   string `toml:"method"`
-	Username string `toml:"username"`
-	Password string `toml:"password"`
-    NoCertCheck boolean `toml:"no_cert_check"`
+	URL         string `toml:"url"` //URL of the xmlrpc.php
+	Project     string `toml:"project"`
+	Category    string `toml:"category"`
+	Method      string `toml:"method"`
+	Username    string `toml:"username"`
+	Password    string `toml:"password"`
+	NoCertCheck bool   `toml:"no_cert_check"`
 }
 
 // ConfigStruct returns the struct for reading the configuration file
@@ -92,11 +92,11 @@ type callFunc func(subject, body string) (int, error)
 type mantisSender struct {
 	URL, project, category, username, password, method string
 	callers                                            map[string]callFunc
-    client *http.Client
+	client                                             *http.Client
 }
 
 // NewMantisSender returns a new Mantis sender
-func NewMantisSender(url, project, category, method, username, password string, noCertCheck boolean) *mantisSender {
+func NewMantisSender(url, project, category, method, username, password string, noCertCheck bool) *mantisSender {
 	ms := &mantisSender{callers: make(map[string]callFunc, 4)}
 	if method == "" {
 		method = "new_issue"
@@ -106,15 +106,14 @@ func NewMantisSender(url, project, category, method, username, password string, 
 	if ms.method == "" {
 		ms.method = "new_issue"
 	}
-    ms.noCertCheck = noCertCheck
 	tr := &http.Transport{
-        DisableKeepAlives: false,
-		DisableCompression: false,
-        ResponseHeaderTimeout: 30,
+		DisableKeepAlives:     false,
+		DisableCompression:    false,
+		ResponseHeaderTimeout: 30,
 	}
-    if noCertCheck {
-        tr.TLSClientConfig = &tls.Config{InsecureSkipVerify:true}
-    }
+	if noCertCheck {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	ms.client = &http.Client{Transport: tr}
 	return ms
 }
@@ -145,7 +144,7 @@ func (ms *mantisSender) Send(subject, body string) (int, error) {
 }
 
 // Call is an xmlrpc.Call, but without gzip and Basic Auth and strips non-xml
-func Call(client *http.Client,uri, username, password, name string, args ...interface{}) (
+func Call(client *http.Client, uri, username, password, name string, args ...interface{}) (
 	interface{}, *xmlrpc.Fault, error) {
 
 	buf := bytes.NewBuffer(nil)
