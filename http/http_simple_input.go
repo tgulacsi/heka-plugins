@@ -145,6 +145,7 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 	var (
 		i int64
 		s string
+        f *message.Field
 	)
 	start := time.Now().UnixNano() - 1000000
 
@@ -210,12 +211,10 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 				pack.Message.Payload = &t
 			}
 		default:
-			if pack.Message.Fields == nil {
-				pack.Message.Fields = make([]*message.Field, 0, 1)
-			}
-			t := k
-			pack.Message.Fields = append(pack.Message.Fields,
-				&message.Field{Name: &t, ValueString: []string{vs[0]}})
+            if f, err = message.NewField(k, vs[0], vs[0]); err != nil {
+                parsErr(fmt.Errorf("cannot create field for %q=%q: %s", k, vs[0], err))
+            }
+            pack.Message.AddField(f)
 		}
 	}
 	if pack.Message.Payload == nil || *pack.Message.Payload == "" {

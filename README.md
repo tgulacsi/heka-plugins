@@ -1,17 +1,23 @@
 # Heka plugins
-See http://hekad.readthedocs.org/en/latest/developing/plugin.html#plugins
+See [Building *hekad* with External Plugins](http://hekad.readthedocs.org/en/latest/installing.html#build-include-externals)
 for compiling in plugins.
 
-Basically, you'll need to edit the etc/plugin_packages.json file
-and heka will recognize your plugins. Such as
+Basically, you'll need to edit the cmake/plugin_loader.cmake file and add
 
-    {"plugin_packages": ["github.com/mozilla-services/heka-mozsvc-plugins",
-        "github.com/tgulacsi/heka-plugins/email",
-        "github.com/tgulacsi/heka-plugins/http",
-        "github.com/tgulacsi/heka-plugins/twilio",
-        "github.com/tgulacsi/heka-plugins/mantis"
-        ]}
+    add_external_plugin(git https://github.com/tgulacsi/heka-plugins master)
 
+OR (if you don't need all the plugins)
+
+    add_external_plugin(git https://github.com/tgulacsi/heka-plugins/email master)
+
+for email.
+
+Then add the needed extra packages' get into build.sh
+
+    go get github.com/sfreiberg/gotwilio  # for twilio (SMS)
+    go get github.com/tgulacsi/go-xmlrpc  # for mantis
+
+right before `make`.
 
 ## TwilioOutput
 Give Twilio's sid and token, a from and some to, and don't forget to set the
