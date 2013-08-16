@@ -8,7 +8,7 @@ Basically, you'll need to edit the cmake/plugin_loader.cmake file and add
 
 OR (if you don't need all the plugins)
 
-    add_external_plugin(git https://github.com/tgulacsi/heka-plugins/email master)
+    add_external_plugin(git https://github.com/tgulacsi/heka-plugins master email)
 
 for email.
 
