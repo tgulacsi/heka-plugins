@@ -22,6 +22,9 @@ import (
 
 	"github.com/mozilla-services/heka/message"
 	"github.com/mozilla-services/heka/pipeline"
+
+	"code.google.com/p/go.text/transform"
+	"github.com/tgulacsi/go/text"
 )
 
 // FileReadFilter plugin for expanding messages from external files based on template
@@ -29,6 +32,7 @@ import (
 type FileReadFilter struct {
 	tmpl    *template.Template
 	newType string
+	decoder transform.Transformer
 }
 
 // Extract hosts value from config and store it on the plugin instance.
@@ -44,6 +48,18 @@ func (fr *FileReadFilter) Init(config interface{}) (err error) {
 	}
 	if fr.newType, ok = value.(string); !ok {
 		return errors.New("FileReadFilter: 'newType' setting not a string value.")
+	}
+	if value, ok = conf["sourceEncoding"]; !ok {
+		log.Printf("FileReadFilter: no source encoding specified - source should be UTF-8!")
+	} else {
+		if str, ok = value.(string); !ok {
+			return errors.New("FileReadFilter: 'sourceEncoding' setting not a string value.")
+		}
+		e := text.GetEncoding(str)
+		if e == nil {
+			return fmt.Errorf("FileReadFilter: 'sourceEncoding' with value %q is unknown.", str)
+		}
+		fr.decoder = e.NewDecoder()
 	}
 
 	if value, ok = conf["pattern"]; !ok {
@@ -80,6 +96,7 @@ func (fr FileReadFilter) Run(r pipeline.FilterRunner, h pipeline.PluginHelper) (
 	}
 	var (
 		fh           *os.File
+		inp          io.Reader
 		npack, opack *pipeline.PipelinePack
 	)
 	out := bytes.NewBuffer(make([]byte, 0, 4096))
@@ -100,7 +117,11 @@ func (fr FileReadFilter) Run(r pipeline.FilterRunner, h pipeline.PluginHelper) (
 		}
 		out.Reset()
 		//if _, err = io.Copy(out, io.LimitedReader{R: fh, N: 65000}); err != nil && err != io.EOF {
-		if _, err = io.Copy(out, fh); err != nil && err != io.EOF {
+		inp = fh
+		if fr.decoder != nil {
+			inp = transform.NewReader(fh, fr.decoder)
+		}
+		if _, err = io.Copy(out, inp); err != nil && err != io.EOF {
 			opack.Recycle()
 			fh.Close()
 			return fmt.Errorf("FileReadFilter: error reading %q: %v", fh.Name(), err)
