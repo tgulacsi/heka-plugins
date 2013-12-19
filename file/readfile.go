@@ -106,5 +106,5 @@ func (fr FileReader) Run(r pipeline.FilterRunner, h pipeline.PluginHelper) (err 
 }
 
 func init() {
-	pipeline.RegisterPlugin("FileReader", func() interface{} { return new(FileReader) })
+	pipeline.RegisterPlugin("FileReaderFilter", func() interface{} { return new(FileReader) })
 }
