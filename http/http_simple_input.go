@@ -30,12 +30,12 @@ import (
 type HTTPSimpleInput struct {
 	Address string
 
-	listener net.Listener
-	packs    chan *pipeline.PipelinePack
-	input    chan *pipeline.PipelinePack
-	ds       pipeline.DecoderSet
-	stop     chan bool
-	errch    chan error
+	listener      net.Listener
+	packs         chan *pipeline.PipelinePack
+	input         chan *pipeline.PipelinePack
+	DecoderRunner func(name string) (dRunner pipeline.DecoderRunner, ok bool)
+	stop          chan bool
+	errch         chan error
 }
 
 // Stop is called when the main hekad wants to stop
@@ -67,7 +67,7 @@ func (hsi *HTTPSimpleInput) Run(ir pipeline.InputRunner, h pipeline.PluginHelper
 	hsi.input = make(chan *pipeline.PipelinePack)
 	hsi.errch = make(chan error, 1)
 	hsi.packs = ir.InChan()
-	hsi.ds = h.DecoderSet()
+	hsi.DecoderRunner = h.DecoderRunner
 
 	go hsi.listen()
 	var pack *pipeline.PipelinePack
@@ -127,7 +127,7 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 		if ct == "application/x-protobuf" {
 			k = "PROTOCOL_BUFFER"
 		}
-		dr, ok := hsi.ds.ByName(k)
+		dr, ok := hsi.DecoderRunner(k)
 		if !ok {
 			parsErr(fmt.Errorf("cannot get decoder for %s", k))
 			return
@@ -145,7 +145,7 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 	var (
 		i int64
 		s string
-        f *message.Field
+		f *message.Field
 	)
 	start := time.Now().UnixNano() - 1000000
 
@@ -211,12 +211,12 @@ func (hsi *HTTPSimpleInput) handler(w http.ResponseWriter, r *http.Request) {
 				pack.Message.Payload = &t
 			}
 		default:
-            if f, err = message.NewField(k, vs[0], vs[0]); err != nil {
-                parsErr(fmt.Errorf("cannot create field for %q=%q: %s", k, vs[0], err))
-            }
-            if f != nil && f.ValueType != nil {
-                pack.Message.AddField(f)
-            }
+			if f, err = message.NewField(k, vs[0], vs[0]); err != nil {
+				parsErr(fmt.Errorf("cannot create field for %q=%q: %s", k, vs[0], err))
+			}
+			if f != nil && f.ValueType != nil {
+				pack.Message.AddField(f)
+			}
 		}
 	}
 	if pack.Message.Payload == nil || *pack.Message.Payload == "" {
