@@ -278,7 +278,5 @@ func sendMail(addr string, a smtp.Auth, from string, to []string, msg []byte, ti
 }
 
 func init() {
-	pipeline.RegisterPlugin("EmailOutput", func() interface{} {
-		return new(EmailOutput)
-	})
+	pipeline.RegisterPlugin("EmailOutput", func() interface{} { return new(EmailOutput) })
 }
