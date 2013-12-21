@@ -110,10 +110,11 @@ func (fr FileReadFilter) Run(r pipeline.FilterRunner, h pipeline.PluginHelper) (
 			return fmt.Errorf("FileReadFilter: error executing template %v with message %v: %v",
 				fr.tmpl, opack.Message, err)
 		}
-		log.Printf("out=%q", out)
+		//log.Printf("out=%q", out)
 		if fh, err = os.Open(out.String()); err != nil {
+			log.Printf("FileReadFilter: cannot read %q: %v", out, err)
 			opack.Recycle()
-			return fmt.Errorf("FileReadFilter: cannot read %q: %v", out, err)
+			continue
 		}
 		out.Reset()
 		//if _, err = io.Copy(out, io.LimitedReader{R: fh, N: 65000}); err != nil && err != io.EOF {
@@ -122,9 +123,10 @@ func (fr FileReadFilter) Run(r pipeline.FilterRunner, h pipeline.PluginHelper) (
 			inp = transform.NewReader(fh, fr.decoder)
 		}
 		if _, err = io.Copy(out, inp); err != nil && err != io.EOF {
+			log.Printf("FileReadFilter: error reading %q: %v", fh.Name(), err)
 			opack.Recycle()
 			fh.Close()
-			return fmt.Errorf("FileReadFilter: error reading %q: %v", fh.Name(), err)
+			continue
 		}
 		fh.Close()
 
