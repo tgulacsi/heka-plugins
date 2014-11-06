@@ -23,7 +23,7 @@ import (
 	"github.com/mozilla-services/heka/message"
 	"github.com/mozilla-services/heka/pipeline"
 
-	"code.google.com/p/go.text/transform"
+	"golang.org/x/text/transform"
 	"github.com/tgulacsi/go/text"
 )
 
